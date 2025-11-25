@@ -5,197 +5,153 @@ import pandas as pd
 import streamlit as st
 import matplotlib.pyplot as plt
 
+# ---- CONFIGURACIÓN GENERAL ----
 st.set_page_config(page_title="Dashboard Inventario", layout="wide")
-st.title("📦 Dashboard Inventario – WayUP (OneDrive link)")
+st.markdown("<h2 style='text-align:center;color:#2E86C1;'>📦 Dashboard Inventario – WayUP</h2>", unsafe_allow_html=True)
 
-# 1) MÚLTIPLES ARCHIVOS EN ONEDRIVE (EDITA ESTE DICCIONARIO)
+# ---- ARCHIVOS DESDE ONEDRIVE ----
 ARCHIVOS = {
     "inventario.xlsx": "https://warehousing-my.sharepoint.com/:x:/g/personal/dflores_warehousing_cl/Ee1usbdQDZhDme2vsa2hYXwBZdFLHdeg65l-wmCii__fHw?e=J4rrv2",
-    # agrega más:
-    # "inventario2.xlsx": "https://TU_OTRO_LINK",
 }
 
-archivo_sel = st.selectbox("📁 Selecciona archivo de inventario", list(ARCHIVOS.keys()))
+archivo_sel = st.selectbox("📁 Selecciona archivo", list(ARCHIVOS.keys()))
 base_url = ARCHIVOS[archivo_sel]
-
-# Asegurar URL de descarga
-if "download=1" in base_url:
-    DOWNLOAD_URL = base_url
-else:
-    DOWNLOAD_URL = base_url + ("&download=1" if "?" in base_url else "?download=1")
-
-st.caption(f"Origen de datos: OneDrive/SharePoint – {archivo_sel}")
+DOWNLOAD_URL = base_url + ("&download=1" if "?" in base_url else "?download=1")
 
 if st.button("🔄 Actualizar datos"):
     st.rerun()
 
+# ---- FUNCIONES AUXILIARES ----
+def limpiar(col): return re.sub(r"\s+", "", col).lower()
 
-# ---------- FUNCIONES AUXILIARES ----------
-
-def limpiar_nombre(col):
-    return re.sub(r"\s+", "", col).lower()
-
-def buscar_cantidad(df):
-    for col in df.columns:
-        c = limpiar_nombre(col)
-        if c == "cantidad":
-            return col
-    for col in df.columns:
-        c = limpiar_nombre(col)
-        if "cantidad" in c and "contar" not in c:
-            return col
+def col_cantidad(df):
+    for c in df.columns:
+        x = limpiar(c)
+        if x == "cantidad": return c
+    for c in df.columns:
+        x = limpiar(c)
+        if "cantidad" in x and "contar" not in x: return c
     return None
 
-def buscar_cantidad_contar(df):
-    for col in df.columns:
-        c = limpiar_nombre(col)
-        if c in ["cantidadacontar", "cantidadaacontar"]:
-            return col
-        if "cantidad" in c and "contar" in c:
-            return col
+def col_contar(df):
+    for c in df.columns:
+        x = limpiar(c)
+        if "cantidad" in x and "contar" in x: return c
     return None
 
-def buscar_producto(df):
-    for col in df.columns:
-        c = limpiar_nombre(col)
-        if "cod" in c and "producto" in c:
-            return col
+def col_producto(df):
+    for c in df.columns:
+        x = limpiar(c)
+        if "cod" in x and "producto" in x: return c
     return None
 
-
-# ---------- DESCARGA DESDE ONEDRIVE ----------
-
+# ---- DESCARGA EXCEL ----
 try:
     resp = requests.get(DOWNLOAD_URL)
-    if resp.status_code != 200:
-        st.error(f"❌ Error descargando desde OneDrive (status {resp.status_code}). "
-                 "Revisa permisos o el link del archivo seleccionado.")
-        st.stop()
     df = pd.read_excel(io.BytesIO(resp.content))
 except Exception as e:
-    st.error(f"❌ Error leyendo el Excel desde OneDrive: {e}")
+    st.error(f"❌ Error descargando: {e}")
     st.stop()
 
 df.columns = [c.strip() for c in df.columns]
 
-col_cant = buscar_cantidad(df)
-col_cont = buscar_cantidad_contar(df)
+c_cant = col_cantidad(df)
+c_cont = col_contar(df)
 
-if not col_cant or not col_cont:
-    st.error("⚠️ No se detectaron las columnas 'Cantidad' o 'Cantidad a contar'.")
-    st.write("Columnas encontradas:", list(df.columns))
-    st.stop()
+df[c_cant] = pd.to_numeric(df[c_cant], errors="coerce").fillna(0)
+df[c_cont] = pd.to_numeric(df[c_cont], errors="coerce").fillna(0)
 
-df[col_cant] = pd.to_numeric(df[col_cant], errors="coerce").fillna(0)
-df[col_cont] = pd.to_numeric(df[col_cont], errors="coerce").fillna(0)
-df["Dif_calc"] = df[col_cont] - df[col_cant]
+df["Dif_calc"] = df[c_cont] - df[c_cant]
 
-tot_sist = df[col_cant].sum()
-tot_cont = df[col_cont].sum()
-tot_dif = df["Dif_calc"].sum()
+# ---- CÁLCULOS ----
+tot_sist = df[c_cant].sum()
+tot_cont = df[c_cont].sum()
 pct_avance = (tot_cont / tot_sist * 100) if tot_sist else 0
-pct_dif = (tot_dif / tot_sist * 100) if tot_sist else 0
+pct_dif = (df["Dif_calc"].sum() / tot_sist * 100) if tot_sist else 0
 
-# ---------- KPI PRINCIPALES ----------
-c1, c2, c3, c4, c5 = st.columns(5)
-c1.metric("Cantidad sistema", f"{tot_sist:,.0f}")
-c2.metric("Cantidad contada", f"{tot_cont:,.0f}")
-c3.metric("Diferencia total", f"{tot_dif:,.0f}")
-c4.metric("% diferencia", f"{pct_dif:.2f}%")
-c5.metric("% avance conteo", f"{pct_avance:.2f}%")
+# ---- KPIS ----
+col_kpi = st.columns(5)
+col_kpi[0].metric("Sistema", f"{tot_sist:,.0f}")
+col_kpi[1].metric("Contado", f"{tot_cont:,.0f}")
+col_kpi[2].metric("Diferencias", f"{df['Dif_calc'].sum():,.0f}")
+col_kpi[3].metric("% Dif.", f"{pct_dif:.2f}%")
+col_kpi[4].metric("% Avance", f"{pct_avance:.2f}%")
 
-st.progress(min(pct_avance / 100, 1.0))
-st.caption(f"📊 Avance general de conteo: **{pct_avance:.2f}%**")
+st.progress(min(pct_avance/100, 1.0))
 
+# ---- GRÁFICOS DISTRIBUIDOS (2 COLUMNAS) ----
+col_g1, col_g2 = st.columns(2)
 
-# ---------- 3) GRÁFICOS DE AVANCE ----------
-
-st.subheader("📈 Avance de conteo")
-
-# 3.a) Gráfico de ANILLO general (avance vs pendiente)
-st.markdown("**Avance general (gráfico de anillo)**")
-pct_g = max(0, min(pct_avance, 100))
-restante = 100 - pct_g
-
-fig1, ax1 = plt.subplots()
-ax1.pie(
-    [pct_g, restante],
-    labels=[f"{pct_g:.1f}% avance", ""],
-    startangle=90,
-    counterclock=False,
-    wedgeprops=dict(width=0.3)
-)
-ax1.set(aspect="equal")
-st.pyplot(fig1)
-
-# 3.b) Gráfico de TORTA por contador (avance de un contador)
-if "Contador" in df.columns:
-    st.markdown("**Avance por contador (selecciona un contador)**")
-    grp = df.groupby("Contador").agg(
-        cantidad_sistema=(col_cant, "sum"),
-        cantidad_contada=(col_cont, "sum")
-    ).reset_index()
-    grp["avance_pct"] = grp.apply(
-        lambda x: (x["cantidad_contada"] / x["cantidad_sistema"] * 100)
-        if x["cantidad_sistema"] else 0,
-        axis=1
-    )
-
-    cont_sel = st.selectbox("Selecciona contador para ver su avance", grp["Contador"])
-    fila = grp[grp["Contador"] == cont_sel].iloc[0]
-    pct_c = max(0, min(fila["avance_pct"], 100))
-    restante_c = 100 - pct_c
-
-    fig2, ax2 = plt.subplots()
-    ax2.pie(
-        [pct_c, restante_c],
-        labels=[f"{pct_c:.1f}% contado", f"{restante_c:.1f}% pendiente"],
+# --- 1) ANILLO DE AVANCE GENERAL ---
+with col_g1:
+    st.markdown("### 🎯 Avance General")
+    fig, ax = plt.subplots(figsize=(4, 4))
+    ax.pie(
+        [pct_avance, 100 - pct_avance],
+        colors=["#2ECC71", "#E5E7E9"],
         startangle=90,
-        counterclock=False
+        counterclock=False,
+        wedgeprops={"width": 0.3},
     )
-    ax2.set(aspect="equal")
-    st.pyplot(fig2)
+    ax.text(0, 0, f"{pct_avance:.1f}%", ha="center", va="center", fontsize=20, color="#2ECC71")
+    ax.set(aspect="equal")
+    st.pyplot(fig)
 
-    st.dataframe(grp, use_container_width=True)
-else:
-    st.info("No existe la columna 'Contador' para graficar avance por contador.")
+# --- 2) TORTA POR CONTADOR ---
+with col_g2:
+    st.markdown("### 🧍 Avance por Contador")
+    if "Contador" in df.columns:
+        grp = df.groupby("Contador").agg(
+            sist=(c_cant, "sum"),
+            cont=(c_cont, "sum")
+        )
+        grp["pct"] = grp["cont"] / grp["sist"] * 100
 
+        cont_sel = st.selectbox("Selecciona Contador", grp.index)
+        pct = grp.loc[cont_sel, "pct"]
 
-# ---------- 5) TOP DIFERENCIAS POR PRODUCTO ----------
+        fig2, ax2 = plt.subplots(figsize=(4, 4))
+        ax2.pie(
+            [pct, 100 - pct],
+            labels=[f"{pct:.1f}% contado", ""],
+            colors=["#3498DB", "#E5E7E9"],
+            startangle=90,
+            wedgeprops={"width": 0.4},
+        )
+        ax2.set(aspect="equal")
+        st.pyplot(fig2)
+    else:
+        st.info("No existe columna 'Contador'.")
 
-st.subheader("📊 Top diferencias por producto")
+# ---- TOP DIFERENCIAS (15 PRODUCTOS) ----
+st.markdown("### 🔎 Top 15 Productos con Mayor Diferencia (Barras horizontales)")
 
-col_prod = buscar_producto(df)
-if col_prod:
-    dif_prod = df.groupby(col_prod)["Dif_calc"].sum().reset_index()
-    dif_prod["abs_dif"] = dif_prod["Dif_calc"].abs()
-    dif_top = dif_prod.sort_values("abs_dif", ascending=False).head(10).set_index(col_prod)
-    st.markdown("**Top 10 productos por diferencia absoluta (sobrante/faltante)**")
-    st.bar_chart(dif_top[["Dif_calc"]])
-    st.dataframe(dif_top, use_container_width=True)
-else:
-    st.info("No se encontró columna de código de producto para análisis de diferencias.")
+c_prod = col_producto(df)
+if c_prod:
+    dif = df.groupby(c_prod)["Dif_calc"].sum().abs().sort_values(ascending=False).head(15)
 
+    fig3, ax3 = plt.subplots(figsize=(10, 6))
+    ax3.barh(dif.index, dif.values, color="#F39C12")
+    ax3.invert_yaxis()
+    ax3.set_xlabel("Diferencia Absoluta")
+    ax3.set_title("Top 15 productos con mayor diferencia")
+    st.pyplot(fig3)
 
-# ---------- FILTROS Y DETALLE ----------
-
+# ---- FILTROS Y TABLA ----
 with st.expander("Filtros"):
-    cont_vals = df["Contador"].unique() if "Contador" in df.columns else []
-    cli_vals = df["Cliente"].unique() if "Cliente" in df.columns else []
-    ubic_vals = df["Ubicación"].unique() if "Ubicación" in df.columns else []
-    cont = st.multiselect("Contador", cont_vals)
-    cli = st.multiselect("Cliente", cli_vals)
-    ubic = st.multiselect("Ubicación", ubic_vals)
+    contadores = df["Contador"].unique() if "Contador" in df.columns else []
+    clientes = df["Cliente"].unique() if "Cliente" in df.columns else []
+    ubicaciones = df["Ubicación"].unique() if "Ubicación" in df.columns else []
+
+    sel_cont = st.multiselect("Contador", contadores)
+    sel_cli = st.multiselect("Cliente", clientes)
+    sel_ubi = st.multiselect("Ubicación", ubicaciones)
 
 df_f = df.copy()
-if cont and "Contador" in df_f.columns:
-    df_f = df_f[df_f["Contador"].isin(cont)]
-if cli and "Cliente" in df_f.columns:
-    df_f = df_f[df_f["Cliente"].isin(cli)]
-if ubic and "Ubicación" in df_f.columns:
-    df_f = df_f[df_f["Ubicación"].isin(ubic)]
+if sel_cont: df_f = df_f[df_f["Contador"].isin(sel_cont)]
+if sel_cli: df_f = df_f[df_f["Cliente"].isin(sel_cli)]
+if sel_ubi: df_f = df_f[df_f["Ubicación"].isin(sel_ubi)]
 
-st.subheader("📄 Detalle inventario")
-df_f_display = df_f.fillna("")   # 4) columnas vacías en vez de None
-st.dataframe(df_f_display, use_container_width=True)
+st.markdown("### 📄 Detalle Inventario")
+st.dataframe(df_f.fillna(""), use_container_width=True)
 
