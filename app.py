@@ -3,9 +3,15 @@ import streamlit as st
 import re
 
 st.set_page_config(page_title="Dashboard Inventario", layout="wide")
-st.title("📦 Dashboard Inventario – WayUP")
+st.title("📦 Dashboard Inventario – WayUP (OneDrive)")
 
-file = st.file_uploader("Sube el Excel de inventario", type=["xlsx", "xls"])
+# 🔁 Ruta fija al archivo sincronizado con OneDrive (ajusta esto)
+RUTA_ARCHIVO = r"C:\Users\dflores\Warehousing Valle Grande SA\Operaciones - 001 CONTROL STOCK\Respaldos de inventarios con clientes\Prueba\REPORTE INVENTARIO 25-11-2025.xlsx"
+st.caption(f"Origen de datos: {RUTA_ARCHIVO}")
+
+# Botón para recargar sin subir archivo
+if st.button("🔄 Actualizar datos"):
+    st.experimental_rerun()
 
 def limpiar_nombre(col):
     return re.sub(r"\s+", "", col).lower()
@@ -30,62 +36,60 @@ def buscar_cantidad_contar(df):
             return col
     return None
 
-if file is not None:
-    df = pd.read_excel(file)
-    df.columns = [c.strip() for c in df.columns]
+# 📥 Leer siempre el mismo archivo
+try:
+    df = pd.read_excel(RUTA_ARCHIVO)
+except FileNotFoundError:
+    st.error("❌ No encuentro el archivo. Revisa la ruta y que OneDrive esté sincronizado.")
+    st.stop()
 
-    col_cant = buscar_cantidad(df)
-    col_cont = buscar_cantidad_contar(df)
+df.columns = [c.strip() for c in df.columns]
 
-    if not col_cant or not col_cont:
-        st.error(
-            "⚠️ No se pudieron detectar las columnas de "
-            "'Cantidad' o 'Cantidad a contar'.\n\n"
-            "Revisa los encabezados del Excel exportado desde WayUP."
-        )
-        st.write("Columnas detectadas:", list(df.columns))
-        st.stop()
+col_cant = buscar_cantidad(df)
+col_cont = buscar_cantidad_contar(df)
 
-    df[col_cant] = pd.to_numeric(df[col_cant], errors="coerce").fillna(0)
-    df[col_cont] = pd.to_numeric(df[col_cont], errors="coerce").fillna(0)
+if not col_cant or not col_cont:
+    st.error("⚠️ No se pudieron detectar las columnas 'Cantidad' o 'Cantidad a contar'.")
+    st.write("Columnas detectadas:", list(df.columns))
+    st.stop()
 
-    df["Dif_calc"] = df[col_cont] - df[col_cant]
+df[col_cant] = pd.to_numeric(df[col_cant], errors="coerce").fillna(0)
+df[col_cont] = pd.to_numeric(df[col_cont], errors="coerce").fillna(0)
 
-    tot_sist = df[col_cant].sum()
-    tot_cont = df[col_cont].sum()
-    tot_dif = df["Dif_calc"].sum()
+df["Dif_calc"] = df[col_cont] - df[col_cant]
 
-    pct_avance = (tot_cont / tot_sist * 100) if tot_sist else 0
-    pct_dif = (tot_dif / tot_sist * 100) if tot_sist else 0
+tot_sist = df[col_cant].sum()
+tot_cont = df[col_cont].sum()
+tot_dif = df["Dif_calc"].sum()
 
-    c1, c2, c3, c4 = st.columns(4)
-    c1.metric("Cantidad sistema", f"{tot_sist:,.0f}")
-    c2.metric("Cantidad contada", f"{tot_cont:,.0f}")
-    c3.metric("Diferencia total", f"{tot_dif:,.0f}")
-    c4.metric("% diferencia", f"{pct_dif:.2f}%")
+pct_avance = (tot_cont / tot_sist * 100) if tot_sist else 0
+pct_dif = (tot_dif / tot_sist * 100) if tot_sist else 0
 
-    st.progress(min(pct_avance / 100, 1.0))
-    st.caption(f"Avance de conteo: {pct_avance:.2f}%")
+c1, c2, c3, c4 = st.columns(4)
+c1.metric("Cantidad sistema", f"{tot_sist:,.0f}")
+c2.metric("Cantidad contada", f"{tot_cont:,.0f}")
+c3.metric("Diferencia total", f"{tot_dif:,.0f}")
+c4.metric("% diferencia", f"{pct_dif:.2f}%")
 
-    with st.expander("Filtros"):
-        cont_vals = df["Contador"].unique() if "Contador" in df.columns else []
-        cli_vals = df["Cliente"].unique() if "Cliente" in df.columns else []
-        ubic_vals = df["Ubicación"].unique() if "Ubicación" in df.columns else []
+st.progress(min(pct_avance / 100, 1.0))
+st.caption(f"Avance de conteo: {pct_avance:.2f}%")
 
-        cont = st.multiselect("Contador", cont_vals)
-        cli = st.multiselect("Cliente", cli_vals)
-        ubic = st.multiselect("Ubicación", ubic_vals)
+with st.expander("Filtros"):
+    cont_vals = df["Contador"].unique() if "Contador" in df.columns else []
+    cli_vals = df["Cliente"].unique() if "Cliente" in df.columns else []
+    ubic_vals = df["Ubicación"].unique() if "Ubicación" in df.columns else []
 
-    df_f = df.copy()
-    if cont and "Contador" in df_f.columns:
-        df_f = df_f[df_f["Contador"].isin(cont)]
-    if cli and "Cliente" in df_f.columns:
-        df_f = df_f[df_f["Cliente"].isin(cli)]
-    if ubic and "Ubicación" in df_f.columns:
-        df_f = df_f[df_f["Ubicación"].isin(ubic)]
+    cont = st.multiselect("Contador", cont_vals)
+    cli = st.multiselect("Cliente", cli_vals)
+    ubic = st.multiselect("Ubicación", ubic_vals)
 
-    st.subheader("Detalle inventario")
-    st.dataframe(df_f, use_container_width=True)
-else:
-    st.info("Sube el archivo Excel exportado desde WayUP para ver el dashboard.")
+df_f = df.copy()
+if cont and "Contador" in df_f.columns:
+    df_f = df_f[df_f["Contador"].isin(cont)]
+if cli and "Cliente" in df_f.columns:
+    df_f = df_f[df_f["Cliente"].isin(cli)]
+if ubic and "Ubicación" in df_f.columns:
+    df_f = df_f[df_f["Ubicación"].isin(ubic)]
 
+st.subheader("Detalle inventario")
+st.dataframe(df_f, use_container_width=True)
