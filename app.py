@@ -7,7 +7,7 @@ st.set_page_config(page_title="Dashboard Inventario", layout="wide")
 st.title("📦 Dashboard Inventario – WayUP (OneDrive local)")
 
 # 🔧 AJUSTA TU RUTA AQUÍ (cópiala con "Copiar como ruta de acceso")
-RUTA_ARCHIVO = r"C:\Users\dflores\OneDrive - Warehousing Valle Grande SA\Prueba\REPORTE INVENTARIO 25-11-2025.xlsx"
+RUTA_ARCHIVO = r"C:\Users\dflores\OneDrive - Warehousing Valle Grande SA\Prueba\inventario.xlsx"
 
 # Mostrar la ruta en pantalla
 st.caption(f"📁 Origen de datos: `{RUTA_ARCHIVO}`")
@@ -94,3 +94,4 @@ pct_dif = (tot_dif / tot_sist * 100) if tot_sist else 0
 # ------------------------------
 
 c1, c2
+
