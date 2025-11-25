@@ -1,3 +1,4 @@
+import os
 import pandas as pd
 import streamlit as st
 import re
@@ -5,13 +6,24 @@ import re
 st.set_page_config(page_title="Dashboard Inventario", layout="wide")
 st.title("📦 Dashboard Inventario – WayUP (OneDrive local)")
 
-# 👉 AJUSTA ESTA RUTA A TU PC
-RUTA_ARCHIVO = RUTA_ARCHIVO = r"C:\Users\dflores\OneDrive - Warehousing Valle Grande SA\Prueba\REPORTE INVENTARIO 25-11-2025.xlsx" 
-st.caption(f"Origen de datos: {RUTA_ARCHIVO}")
+# 🔧 AJUSTA TU RUTA AQUÍ (cópiala con "Copiar como ruta de acceso")
+RUTA_ARCHIVO = r"C:\Users\dflores\OneDrive - Warehousing Valle Grande SA\Prueba\REPORTE INVENTARIO 25-11-2025.xlsx"
+
+# Mostrar la ruta en pantalla
+st.caption(f"📁 Origen de datos: `{RUTA_ARCHIVO}`")
+
+# Mostrar si Python ve el archivo
+archivo_existe = os.path.exists(RUTA_ARCHIVO)
+st.write("🔎 ¿El archivo existe según Python?: **", archivo_existe, "**")
 
 # Botón para recargar datos
 if st.button("🔄 Actualizar datos"):
     st.rerun()
+
+
+# ------------------------------
+#   FUNCIONES PARA DETECTAR COLUMNAS
+# ------------------------------
 
 def limpiar_nombre(col):
     return re.sub(r"\s+", "", col).lower()
@@ -36,12 +48,25 @@ def buscar_cantidad_contar(df):
             return col
     return None
 
-# Leer archivo desde OneDrive local
+
+# ------------------------------
+#   CARGA DEL ARCHIVO
+# ------------------------------
+
+if not archivo_existe:
+    st.error("❌ **El archivo NO existe.** Revisa la ruta exacta o que OneDrive esté sincronizado.")
+    st.stop()
+
 try:
     df = pd.read_excel(RUTA_ARCHIVO)
-except FileNotFoundError:
-    st.error("❌ No encuentro el archivo. Revisa la ruta y que OneDrive esté sincronizado.")
+except Exception as e:
+    st.error(f"❌ Error leyendo el archivo: {e}")
     st.stop()
+
+
+# ------------------------------
+#   PROCESAMIENTO
+# ------------------------------
 
 df.columns = [c.strip() for c in df.columns]
 
@@ -49,8 +74,8 @@ col_cant = buscar_cantidad(df)
 col_cont = buscar_cantidad_contar(df)
 
 if not col_cant or not col_cont:
-    st.error("⚠️ No se detectaron columnas 'Cantidad' o 'Cantidad a contar'.")
-    st.write("Columnas detectadas:", list(df.columns))
+    st.error("⚠️ No se detectaron las columnas 'Cantidad' o 'Cantidad a contar'.")
+    st.write("Columnas encontradas:", list(df.columns))
     st.stop()
 
 df[col_cant] = pd.to_numeric(df[col_cant], errors="coerce").fillna(0)
@@ -63,31 +88,9 @@ tot_dif = df["Dif_calc"].sum()
 pct_avance = (tot_cont / tot_sist * 100) if tot_sist else 0
 pct_dif = (tot_dif / tot_sist * 100) if tot_sist else 0
 
-c1, c2, c3, c4 = st.columns(4)
-c1.metric("Cantidad sistema", f"{tot_sist:,.0f}")
-c2.metric("Cantidad contada", f"{tot_cont:,.0f}")
-c3.metric("Diferencia total", f"{tot_dif:,.0f}")
-c4.metric("% diferencia", f"{pct_dif:.2f}%")
 
-st.progress(min(pct_avance / 100, 1.0))
-st.caption(f"Avance de conteo: {pct_avance:.2f}%")
+# ------------------------------
+#   DASHBOARD
+# ------------------------------
 
-with st.expander("Filtros"):
-    cont_vals = df["Contador"].unique() if "Contador" in df.columns else []
-    cli_vals = df["Cliente"].unique() if "Cliente" in df.columns else []
-    ubic_vals = df["Ubicación"].unique() if "Ubicación" in df.columns else []
-    cont = st.multiselect("Contador", cont_vals)
-    cli = st.multiselect("Cliente", cli_vals)
-    ubic = st.multiselect("Ubicación", ubic_vals)
-
-df_f = df.copy()
-if cont and "Contador" in df_f.columns:
-    df_f = df_f[df_f["Contador"].isin(cont)]
-if cli and "Cliente" in df_f.columns:
-    df_f = df_f[df_f["Cliente"].isin(cli)]
-if ubic and "Ubicación" in df_f.columns:
-    df_f = df_f[df_f["Ubicación"].isin(ubic)]
-
-st.subheader("Detalle inventario")
-st.dataframe(df_f, use_container_width=True)
-
+c1, c2
