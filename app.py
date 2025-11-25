@@ -6,7 +6,7 @@ st.set_page_config(page_title="Dashboard Inventario", layout="wide")
 st.title("📦 Dashboard Inventario – WayUP (OneDrive local)")
 
 # 👉 AJUSTA ESTA RUTA A TU PC
-RUTA_ARCHIVO = r"C:\Users\dflores\Warehousing Valle Grande SA\Operaciones - 001 CONTROL STOCK\Respaldos de inventarios con clientes\Prueba\REPORTE INVENTARIO 25-11-2025.xlsx"
+RUTA_ARCHIVO = RUTA_ARCHIVO = r"C:\Users\dflores\OneDrive - Warehousing Valle Grande SA\Prueba\REPORTE INVENTARIO 25-11-2025.xlsx" 
 st.caption(f"Origen de datos: {RUTA_ARCHIVO}")
 
 # Botón para recargar datos
@@ -90,3 +90,4 @@ if ubic and "Ubicación" in df_f.columns:
 
 st.subheader("Detalle inventario")
 st.dataframe(df_f, use_container_width=True)
+
