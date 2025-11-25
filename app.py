@@ -3,15 +3,15 @@ import streamlit as st
 import re
 
 st.set_page_config(page_title="Dashboard Inventario", layout="wide")
-st.title("📦 Dashboard Inventario – WayUP (OneDrive)")
+st.title("📦 Dashboard Inventario – WayUP (OneDrive local)")
 
-# 🔁 Ruta fija al archivo sincronizado con OneDrive (ajusta esto)
+# 👉 AJUSTA ESTA RUTA A TU PC
 RUTA_ARCHIVO = r"C:\Users\dflores\Warehousing Valle Grande SA\Operaciones - 001 CONTROL STOCK\Respaldos de inventarios con clientes\Prueba\REPORTE INVENTARIO 25-11-2025.xlsx"
 st.caption(f"Origen de datos: {RUTA_ARCHIVO}")
 
-# Botón para recargar sin subir archivo
+# Botón para recargar datos
 if st.button("🔄 Actualizar datos"):
-    st.experimental_rerun()
+    st.rerun()
 
 def limpiar_nombre(col):
     return re.sub(r"\s+", "", col).lower()
@@ -36,7 +36,7 @@ def buscar_cantidad_contar(df):
             return col
     return None
 
-# 📥 Leer siempre el mismo archivo
+# Leer archivo desde OneDrive local
 try:
     df = pd.read_excel(RUTA_ARCHIVO)
 except FileNotFoundError:
@@ -49,19 +49,17 @@ col_cant = buscar_cantidad(df)
 col_cont = buscar_cantidad_contar(df)
 
 if not col_cant or not col_cont:
-    st.error("⚠️ No se pudieron detectar las columnas 'Cantidad' o 'Cantidad a contar'.")
+    st.error("⚠️ No se detectaron columnas 'Cantidad' o 'Cantidad a contar'.")
     st.write("Columnas detectadas:", list(df.columns))
     st.stop()
 
 df[col_cant] = pd.to_numeric(df[col_cant], errors="coerce").fillna(0)
 df[col_cont] = pd.to_numeric(df[col_cont], errors="coerce").fillna(0)
-
 df["Dif_calc"] = df[col_cont] - df[col_cant]
 
 tot_sist = df[col_cant].sum()
 tot_cont = df[col_cont].sum()
 tot_dif = df["Dif_calc"].sum()
-
 pct_avance = (tot_cont / tot_sist * 100) if tot_sist else 0
 pct_dif = (tot_dif / tot_sist * 100) if tot_sist else 0
 
@@ -78,7 +76,6 @@ with st.expander("Filtros"):
     cont_vals = df["Contador"].unique() if "Contador" in df.columns else []
     cli_vals = df["Cliente"].unique() if "Cliente" in df.columns else []
     ubic_vals = df["Ubicación"].unique() if "Ubicación" in df.columns else []
-
     cont = st.multiselect("Contador", cont_vals)
     cli = st.multiselect("Cliente", cli_vals)
     ubic = st.multiselect("Ubicación", ubic_vals)
