@@ -116,6 +116,7 @@ df["Dif_calc"] = df.apply(
     lambda x: (x[c_cont] - x[c_cant]) if pd.notna(x[c_cont]) else 0,
     axis=1
 )
+df["Diferencias"] = df["Dif_calc"].astype(int)
 
 tot_sist = df[c_cant].sum()
 tot_cont = df[c_cont].sum(skipna=True)
@@ -206,3 +207,4 @@ with tab_detalle:
 
     st.markdown("#### 📄 Detalle de inventario")
     st.dataframe(df_f.fillna(""), use_container_width=True)
+
