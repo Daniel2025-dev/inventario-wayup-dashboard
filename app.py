@@ -1,7 +1,11 @@
 import io, re, os, requests, pandas as pd, streamlit as st
 import matplotlib.pyplot as plt
 
-st.set_page_config(page_title="Dashboard Inventario", layout="wide")
+st.set_page_config(
+    page_title="Dashboard Inventario",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
 
 # ----------------- CSS -----------------
 st.markdown("""
@@ -56,7 +60,7 @@ with st.sidebar:
 # --------- selección de inventario ----------
 c_top1, c_top2 = st.columns([2,1])
 with c_top1:
-    nombre_sel = st.selectbox("Inventario", df_idx["Nombre"])
+    nombre_sel = st.selectbox("Archivo de inventario", df_idx["Nombre"])
 with c_top2:
     if st.button("🔄 Actualizar datos"):
         st.rerun()
@@ -107,6 +111,7 @@ if not c_cant or not c_cont:
 df[c_cant] = pd.to_numeric(df[c_cant], errors="coerce").fillna(0)
 df[c_cont] = pd.to_numeric(df[c_cont], errors="coerce")  # NaN si vacío
 
+# diferencias solo si Cantidad a contar NO es nulo
 df["Dif_calc"] = df.apply(
     lambda x: (x[c_cont] - x[c_cant]) if pd.notna(x[c_cont]) else 0,
     axis=1
