@@ -1,4 +1,4 @@
-import io, re, os, requests, pandas as pd, streamlit as st
+import io, re, os, requests, pandas as pd, streamlit as st, sys
 import matplotlib.pyplot as plt
 
 st.set_page_config(
@@ -94,13 +94,76 @@ def col_producto(df):
     return None
 
 # ----------------- descargar inventario -----------------
+def _flatten_cols(cols):
+    if isinstance(cols, pd.MultiIndex):
+        return [" ".join([str(x) for x in t if str(x) and str(x) != "nan"]).strip() for t in cols]
+    return [str(c) for c in cols]
+
+def _detect_and_read_excel(content):
+    # intenta leer como excel (hoja por defecto). Si las cabeceras están en otra fila,
+    # busca dentro de las primeras filas una que contenga palabras clave como 'cantidad'.
+    try:
+        df_try = pd.read_excel(io.BytesIO(content))
+    except Exception:
+        # intenta como csv por si acaso
+        try:
+            s = content.decode("utf-8", errors="replace")
+            return pd.read_csv(io.StringIO(s))
+        except Exception as e:
+            raise
+
+    # normalizar columnas multiindex
+    df_try.columns = _flatten_cols(df_try.columns)
+
+    # si no detectamos columnas clave, buscar fila de encabezado dentro de las primeras 6 filas
+    def _has_key_cols(dframe):
+        return (col_cantidad(dframe) is not None) and (col_contar(dframe) is not None)
+
+    if _has_key_cols(df_try):
+        return df_try
+
+    # leer sin header para inspeccionar filas
+    try:
+        raw = pd.read_excel(io.BytesIO(content), header=None)
+    except Exception:
+        return df_try
+
+    max_check = min(6, len(raw))
+    for r in range(max_check):
+        row = raw.iloc[r].astype(str).fillna("").tolist()
+        cleaned = [re.sub(r"\s+","",str(x)).lower() for x in row]
+        # si alguna celda de la fila contiene 'cantidad' o 'codproducto' etc.
+        if any(("cantidad" in c) or ("cod" in c and "producto" in c) for c in cleaned):
+            # relectura usando esa fila como header
+            try:
+                df_new = pd.read_excel(io.BytesIO(content), header=r)
+                df_new.columns = _flatten_cols(df_new.columns)
+                return df_new
+            except Exception:
+                continue
+
+    return df_try
+
+df = None
 try:
-    resp = requests.get(DOWNLOAD_URL)
-    df = pd.read_excel(io.BytesIO(resp.content))
+    resp = requests.get(DOWNLOAD_URL, timeout=30)
+    resp.raise_for_status()
+    df = _detect_and_read_excel(resp.content)
+except requests.exceptions.RequestException as e:
+    st.error(f"❌ Error descargando inventario: {e}")
+    st.stop()
+    raise SystemExit(1)
 except Exception as e:
     st.error(f"❌ Error leyendo inventario: {e}")
     st.stop()
+    raise SystemExit(1)
 
+# asegurar que tenemos un DataFrame válido
+if df is None:
+    st.error("❌ No se pudo leer el inventario.")
+    raise SystemExit(1)
+
+# limpiar y normalizar nombres de columna
 df.columns = [c.strip() for c in df.columns]
 c_cant = col_cantidad(df)
 c_cont = col_contar(df)
