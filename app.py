@@ -1,9 +1,8 @@
 import io, re, os, requests, pandas as pd, streamlit as st, sys
 import matplotlib.pyplot as plt
-from st_aggrid import AgGrid, GridOptionsBuilder, JsCode
 
 st.set_page_config(
-    page_title="Sistema de Conteo de Inventario Físico con Tablet - WayUP",
+    page_title="Dashboard Inventario",
     layout="wide",
     initial_sidebar_state="expanded"
 )
@@ -27,7 +26,7 @@ h2{font-family:"Segoe UI",sans-serif;color:#1f2937;}
 </style>
 """, unsafe_allow_html=True)
 
-st.markdown("<h2 style='text-align:center;'>Sistema de Conteo de Inventario Físico con Tablet - WayUP</h2>",
+st.markdown("<h2 style='text-align:center;'>📦 Dashboard Inventario – WayUP</h2>",
             unsafe_allow_html=True)
 
 INDEX_FILE = "inventarios_index.csv"
@@ -36,8 +35,10 @@ INDEX_FILE = "inventarios_index.csv"
 if os.path.exists(INDEX_FILE):
     df_idx = pd.read_csv(INDEX_FILE)
 else:
-    # iniciar índice vacío; el usuario podrá pegar la URL y cargarla directamente
-    df_idx = pd.DataFrame(columns=["Nombre", "URL"])
+    df_idx = pd.DataFrame({
+        "Nombre": ["inventario.xlsx"],
+        "URL": ["https://warehousing-my.sharepoint.com/:x:/g/personal/dflores_warehousing_cl/Ee1usbdQDZhDme2vsa2hYXwBZdFLHdeg65l-wmCii__fHw?e=J4rrv2"]
+    })
     df_idx.to_csv(INDEX_FILE, index=False)
 
 # --------- sidebar: gestión de inventarios ----------
@@ -59,34 +60,17 @@ with st.sidebar:
 # --------- selección de inventario ----------
 c_top1, c_top2 = st.columns([2,1])
 with c_top1:
-    if not df_idx.empty:
-        nombre_sel = st.selectbox("Archivo de inventario", df_idx["Nombre"])
-    else:
-        nombre_sel = None
+    nombre_sel = st.selectbox("Archivo de inventario", df_idx["Nombre"])
 with c_top2:
     if st.button("🔄 Actualizar datos"):
         st.rerun()
 
-if df_idx.empty:
-    # permitir carga directa por URL cuando no hay inventarios guardados
-    url_direct = st.text_input("Pega la URL del archivo en OneDrive/SharePoint")
-    if not url_direct:
-        st.info("No hay inventarios guardados. Pega la URL del archivo en la caja de texto y presiona 'Cargar'.")
-        if st.button("Cargar desde URL"):
-            st.warning("Pega primero la URL.")
-        st.stop()
-    if st.button("Cargar desde URL"):
-        base_url = url_direct
-    else:
-        st.stop()
-    DOWNLOAD_URL = base_url if "download=1" in base_url else base_url + ("&download=1" if "?" in base_url else "?download=1")
-    st.caption(f"🔗 Fuente: {base_url}")
-else:
-    fila_sel = df_idx[df_idx["Nombre"] == nombre_sel].iloc[0]
-    base_url = fila_sel["URL"]
-    DOWNLOAD_URL = base_url if "download=1" in base_url else \
-                   base_url + ("&download=1" if "?" in base_url else "?download=1")
-    st.caption(f"🔗 Fuente: {nombre_sel}")
+fila_sel = df_idx[df_idx["Nombre"] == nombre_sel].iloc[0]
+base_url = fila_sel["URL"]
+DOWNLOAD_URL = base_url if "download=1" in base_url else \
+               base_url + ("&download=1" if "?" in base_url else "?download=1")
+
+st.caption(f"🔗 Fuente: {nombre_sel}")
 
 # ----------------- funciones aux -----------------
 def limpiar(c): return re.sub(r"\s+","",c).lower()
@@ -181,70 +165,11 @@ if df is None:
 
 # limpiar y normalizar nombres de columna
 df.columns = [c.strip() for c in df.columns]
-# ---- Alias y UI de mapeo de columnas ----
-CANONICAL = [
-    "Cliente","Cliente Nombre","Cod. Producto","Descripción","Familia",
-    "Contenedor","Lote","Tratamiento","F. Expiración","fecha recepcion",
-    "UDM","Cantidad","Cantidad a contar","Diferencias","Cant. Reservada",
-    "pedido","Ubicación","Etiqueta","Contador"
-]
-
-ALIASES = {
-    # clave: lista de variantes
-    "cantidad":["cant","cantidad","cantidad_sistema","sistema","stock"],
-    "cantidad_a_contar":["cantidadacontar","cantidad_a_contar","contado","cantidad contar","cantidad_a_contar","cantidad_a_contar"],
-    "cod_producto":["codproducto","cod. producto","cod producto","codigo producto","codigo_producto"],
-    "contador":["contador","contadores","user","person"]
-}
-
-def _auto_map(df):
-    # intenta mapear usando heurísticas
-    mapping = {}
-    for c in df.columns:
-        key = limpiar(c)
-        if key in ("cantidad", "cant") and "cantidad" in key:
-            mapping[c] = "Cantidad"
-        if "cantidad" in key and "contar" in key:
-            mapping[c] = "Cantidad a contar"
-        if "cod" in key and "producto" in key:
-            mapping[c] = "Cod. Producto"
-        if "contador" in key:
-            mapping[c] = "Contador"
-        if "cliente"==key or key.startswith("cliente"):
-            mapping[c] = "Cliente"
-        if "ubicacion" in key or "ubicación" in key:
-            mapping[c] = "Ubicación"
-    return mapping
-
-# mostrar UI para confirmar/ajustar mapeo
-with st.expander("🔧 Ver / ajustar mapeo de columnas detectado", expanded=False):
-    auto = _auto_map(df)
-    cols_opts = ["(no asignar)"] + list(df.columns)
-    user_map = {}
-    for canon in ["Cantidad","Cantidad a contar","Cod. Producto","Contador","Cliente","Ubicación"]:
-        default = "(no asignar)"
-        # buscar predeterminado en auto
-        for k,v in auto.items():
-            if v==canon:
-                default = k
-                break
-        sel = st.selectbox(f"Columna para '{canon}'", cols_opts, index=cols_opts.index(default) if default in cols_opts else 0)
-        if sel != "(no asignar)":
-            user_map[sel] = canon
-
-    if st.button("✔️ Aplicar mapeo"):
-        if user_map:
-            df = df.rename(columns=user_map)
-            st.success("Mapeo aplicado.")
-        else:
-            st.info("No se aplicaron cambios.")
-
-# volver a detectar columnas clave
 c_cant = col_cantidad(df)
 c_cont = col_contar(df)
 if not c_cant or not c_cont:
-    st.error("No se detectan columnas 'Cantidad' o 'Cantidad a contar'. Revisa el mapeo de columnas.")
-    st.write("Columnas detectadas:", list(df.columns)); st.stop()
+    st.error("No se detectan columnas 'Cantidad' o 'Cantidad a contar'.")
+    st.write("Columnas:", list(df.columns)); st.stop()
 
 df[c_cant] = pd.to_numeric(df[c_cant], errors="coerce").fillna(0)
 df[c_cont] = pd.to_numeric(df[c_cont], errors="coerce")  # NaN si vacío
@@ -328,9 +253,9 @@ with tab_resumen:
 
 with tab_detalle:
     with st.expander("Filtros"):
-        conts = df["Contador"].dropna().unique() if "Contador" in df.columns else []
-        clis = df["Cliente"].dropna().unique() if "Cliente" in df.columns else []
-        ubis = df["Ubicación"].dropna().unique() if "Ubicación" in df.columns else []
+        conts = df["Contador"].unique() if "Contador" in df.columns else []
+        clis = df["Cliente"].unique() if "Cliente" in df.columns else []
+        ubis = df["Ubicación"].unique() if "Ubicación" in df.columns else []
         f_cont = st.multiselect("Contador", conts)
         f_cli = st.multiselect("Cliente", clis)
         f_ubi = st.multiselect("Ubicación", ubis)
@@ -344,92 +269,5 @@ with tab_detalle:
         df_f = df_f[df_f["Ubicación"].isin(f_ubi)]
 
     st.markdown("#### 📄 Detalle de inventario")
-
-    # ---- Validaciones y resaltado ----
-    # flags
-    df_f = df_f.copy()
-    df_f["_flag_diferencia"] = df_f["Dif_calc"].abs() > 0
-    df_f["_flag_negativa"] = df_f["Dif_calc"] < 0
-    # duplicados por producto si existe
-    prod_col = col_producto(df_f)
-    if prod_col:
-        df_f["_dup_producto"] = df_f.duplicated(subset=[prod_col], keep=False)
-    else:
-        df_f["_dup_producto"] = False
-
-    # mostrar botones de exportación
-    dif_only = df_f[df_f["Dif_calc"].abs() != 0]
-    csv_all = df_f.to_csv(index=False).encode("utf-8")
-    csv_dif = dif_only.to_csv(index=False).encode("utf-8")
-    to_xlsx = lambda dfx: _to_excel_bytes(dfx)
-
-    cexp1, cexp2 = st.columns([1,1])
-    with cexp1:
-        st.download_button("Exportar todo (CSV)", data=csv_all, file_name="inventario_detalle.csv", mime="text/csv")
-    with cexp2:
-        st.download_button("Exportar diferencias (CSV)", data=csv_dif, file_name="inventario_diferencias.csv", mime="text/csv")
-
-    # helper para excel
-    def _to_excel_bytes(dfx):
-        bio = io.BytesIO()
-        with pd.ExcelWriter(bio, engine="openpyxl") as writer:
-            dfx.to_excel(writer, index=False, sheet_name="Hoja1")
-        return bio.getvalue()
-
-    cexp3, cexp4 = st.columns([1,1])
-    with cexp3:
-        st.download_button("Exportar todo (XLSX)", data=to_xlsx(df_f), file_name="inventario_detalle.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
-    with cexp4:
-        st.download_button("Exportar diferencias (XLSX)", data=to_xlsx(dif_only), file_name="inventario_diferencias.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
-
-    # estilo para resaltar
-    def highlight_rows(row):
-        styles = ["" for _ in row.index]
-        if row.get("_flag_diferencia", False):
-            # resaltar fila entera en amarillo claro
-            return ["background-color: #fff7cd" for _ in row.index]
-        return styles
-
-    # preparar DataFrame para visualización: quitar columnas internas y reemplazar NaN/None por cadena vacía
-    vis_cols = [c for c in df_f.columns if not c.startswith("_flag_")]
-    df_display = df_f[vis_cols].fillna("")
-
-    # crear Styler a partir del DataFrame limpio
-    sty = df_display.style
-    # aplicar highlight a filas con diferencia (usar la columna original en df_f)
-    sty = sty.apply(lambda r: ["background-color: #fff7cd" if abs(df_f.loc[r.name, "Dif_calc"])>0 else "" for _ in r.index], axis=1)
-    # color para valores numéricos negativos
-    sty = sty.applymap(lambda v: "color: red" if isinstance(v, (int, float)) and v < 0 else "")
-
-    # Mostrar tabla con AgGrid para un treeview moderno y formato condicional
-    gb = GridOptionsBuilder.from_dataframe(df_display)
-    gb.configure_default_column(filterable=True, sortable=True, resizable=True)
-
-    # resaltar fila si Dif_calc != 0
-    row_style = JsCode(
-        """
-        function(params) {
-          if (params.data && Math.abs(params.data.Dif_calc) > 0) {
-            return {'background-color':'#fff7cd'}
-          }
-        }
-        """
-    )
-
-    # colorear valores numéricos negativos en rojo
-    num_cols = list(df_display.select_dtypes(include=['number']).columns)
-    for col in num_cols:
-        gb.configure_column(col, cellStyle=JsCode("function(params){ if(params.value<0){return {'color':'red'} } }"))
-
-    gridOptions = gb.build()
-    gridOptions['getRowStyle'] = row_style
-
-    AgGrid(
-        df_display,
-        gridOptions=gridOptions,
-        allow_unsafe_jscode=True,
-        fit_columns_on_grid_load=True,
-        enable_enterprise_modules=False,
-        height=600,
-    )
+    st.dataframe(df_f.fillna(""), use_container_width=True)
 
