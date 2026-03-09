@@ -26,7 +26,7 @@ h2{font-family:"Segoe UI",sans-serif;color:#1f2937;}
 </style>
 """, unsafe_allow_html=True)
 
-st.markdown("<h2 style='text-align:center;'>📦 Dashboard Inventario – WayUP</h2>",
+st.markdown("<h2 style='text-align:center;'>Sistema de Conteo de Inventario Físico con Tablet - WayUP</h2>",
             unsafe_allow_html=True)
 
 INDEX_FILE = "inventarios_index.csv"
