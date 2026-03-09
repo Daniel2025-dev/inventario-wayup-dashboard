@@ -8,7 +8,7 @@ except Exception:
     AGGRID_AVAILABLE = False
 
 st.set_page_config(
-    page_title="Dashboard Inventario",
+    page_title="Herramienta de Inventario conteo fisico – WayUP",
     layout="wide",
     initial_sidebar_state="expanded"
 )
@@ -32,7 +32,7 @@ h2{font-family:"Segoe UI",sans-serif;color:#1f2937;}
 </style>
 """, unsafe_allow_html=True)
 
-st.markdown("<h2 style='text-align:center;'>📦 Dashboard Inventario – WayUP</h2>",
+st.markdown("<h2 style='text-align:center;'>📦 Herramienta de Inventario conteo fisico – WayUP – WayUP</h2>",
             unsafe_allow_html=True)
 
 INDEX_FILE = "inventarios_index.csv"
