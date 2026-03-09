@@ -2,7 +2,7 @@ import io, re, os, requests, pandas as pd, streamlit as st, sys
 import matplotlib.pyplot as plt
 
 st.set_page_config(
-    page_title="Dashboard Inventario",
+    page_title="Sistema de Conteo de Inventario Físico con Tablet - WayUP",
     layout="wide",
     initial_sidebar_state="expanded"
 )
