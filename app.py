@@ -165,11 +165,70 @@ if df is None:
 
 # limpiar y normalizar nombres de columna
 df.columns = [c.strip() for c in df.columns]
+# ---- Alias y UI de mapeo de columnas ----
+CANONICAL = [
+    "Cliente","Cliente Nombre","Cod. Producto","Descripción","Familia",
+    "Contenedor","Lote","Tratamiento","F. Expiración","fecha recepcion",
+    "UDM","Cantidad","Cantidad a contar","Diferencias","Cant. Reservada",
+    "pedido","Ubicación","Etiqueta","Contador"
+]
+
+ALIASES = {
+    # clave: lista de variantes
+    "cantidad":["cant","cantidad","cantidad_sistema","sistema","stock"],
+    "cantidad_a_contar":["cantidadacontar","cantidad_a_contar","contado","cantidad contar","cantidad_a_contar","cantidad_a_contar"],
+    "cod_producto":["codproducto","cod. producto","cod producto","codigo producto","codigo_producto"],
+    "contador":["contador","contadores","user","person"]
+}
+
+def _auto_map(df):
+    # intenta mapear usando heurísticas
+    mapping = {}
+    for c in df.columns:
+        key = limpiar(c)
+        if key in ("cantidad", "cant") and "cantidad" in key:
+            mapping[c] = "Cantidad"
+        if "cantidad" in key and "contar" in key:
+            mapping[c] = "Cantidad a contar"
+        if "cod" in key and "producto" in key:
+            mapping[c] = "Cod. Producto"
+        if "contador" in key:
+            mapping[c] = "Contador"
+        if "cliente"==key or key.startswith("cliente"):
+            mapping[c] = "Cliente"
+        if "ubicacion" in key or "ubicación" in key:
+            mapping[c] = "Ubicación"
+    return mapping
+
+# mostrar UI para confirmar/ajustar mapeo
+with st.expander("🔧 Ver / ajustar mapeo de columnas detectado", expanded=False):
+    auto = _auto_map(df)
+    cols_opts = ["(no asignar)"] + list(df.columns)
+    user_map = {}
+    for canon in ["Cantidad","Cantidad a contar","Cod. Producto","Contador","Cliente","Ubicación"]:
+        default = "(no asignar)"
+        # buscar predeterminado en auto
+        for k,v in auto.items():
+            if v==canon:
+                default = k
+                break
+        sel = st.selectbox(f"Columna para '{canon}'", cols_opts, index=cols_opts.index(default) if default in cols_opts else 0)
+        if sel != "(no asignar)":
+            user_map[sel] = canon
+
+    if st.button("✔️ Aplicar mapeo"):
+        if user_map:
+            df = df.rename(columns=user_map)
+            st.success("Mapeo aplicado.")
+        else:
+            st.info("No se aplicaron cambios.")
+
+# volver a detectar columnas clave
 c_cant = col_cantidad(df)
 c_cont = col_contar(df)
 if not c_cant or not c_cont:
-    st.error("No se detectan columnas 'Cantidad' o 'Cantidad a contar'.")
-    st.write("Columnas:", list(df.columns)); st.stop()
+    st.error("No se detectan columnas 'Cantidad' o 'Cantidad a contar'. Revisa el mapeo de columnas.")
+    st.write("Columnas detectadas:", list(df.columns)); st.stop()
 
 df[c_cant] = pd.to_numeric(df[c_cant], errors="coerce").fillna(0)
 df[c_cont] = pd.to_numeric(df[c_cont], errors="coerce")  # NaN si vacío
@@ -269,5 +328,56 @@ with tab_detalle:
         df_f = df_f[df_f["Ubicación"].isin(f_ubi)]
 
     st.markdown("#### 📄 Detalle de inventario")
-    st.dataframe(df_f.fillna(""), use_container_width=True)
+
+    # ---- Validaciones y resaltado ----
+    # flags
+    df_f = df_f.copy()
+    df_f["_flag_diferencia"] = df_f["Dif_calc"].abs() > 0
+    df_f["_flag_negativa"] = df_f["Dif_calc"] < 0
+    # duplicados por producto si existe
+    prod_col = col_producto(df_f)
+    if prod_col:
+        df_f["_dup_producto"] = df_f.duplicated(subset=[prod_col], keep=False)
+    else:
+        df_f["_dup_producto"] = False
+
+    # mostrar botones de exportación
+    dif_only = df_f[df_f["Dif_calc"].abs() != 0]
+    csv_all = df_f.to_csv(index=False).encode("utf-8")
+    csv_dif = dif_only.to_csv(index=False).encode("utf-8")
+    to_xlsx = lambda dfx: _to_excel_bytes(dfx)
+
+    cexp1, cexp2 = st.columns([1,1])
+    with cexp1:
+        st.download_button("Exportar todo (CSV)", data=csv_all, file_name="inventario_detalle.csv", mime="text/csv")
+    with cexp2:
+        st.download_button("Exportar diferencias (CSV)", data=csv_dif, file_name="inventario_diferencias.csv", mime="text/csv")
+
+    # helper para excel
+    def _to_excel_bytes(dfx):
+        bio = io.BytesIO()
+        with pd.ExcelWriter(bio, engine="openpyxl") as writer:
+            dfx.to_excel(writer, index=False, sheet_name="Hoja1")
+        return bio.getvalue()
+
+    cexp3, cexp4 = st.columns([1,1])
+    with cexp3:
+        st.download_button("Exportar todo (XLSX)", data=to_xlsx(df_f), file_name="inventario_detalle.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+    with cexp4:
+        st.download_button("Exportar diferencias (XLSX)", data=to_xlsx(dif_only), file_name="inventario_diferencias.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+
+    # estilo para resaltar
+    def highlight_rows(row):
+        styles = ["" for _ in row.index]
+        if row.get("_flag_diferencia", False):
+            # resaltar fila entera en amarillo claro
+            return ["background-color: #fff7cd" for _ in row.index]
+        return styles
+
+    sty = df_f.drop(columns=[c for c in df_f.columns if c.startswith("_flag_")]).style
+    # aplicar highlight a filas con diferencia y color texto para negativas
+    sty = sty.apply(lambda r: ["background-color: #fff7cd" if abs(r.get("Dif_calc",0))>0 else "" for _ in r.index], axis=1)
+    sty = sty.applymap(lambda v: "color: red" if isinstance(v,(int,float)) and v<0 else "")
+
+    st.write(sty)
 
