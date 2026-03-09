@@ -35,10 +35,8 @@ INDEX_FILE = "inventarios_index.csv"
 if os.path.exists(INDEX_FILE):
     df_idx = pd.read_csv(INDEX_FILE)
 else:
-    df_idx = pd.DataFrame({
-        "Nombre": ["inventario.xlsx"],
-        "URL": ["https://warehousing-my.sharepoint.com/:x:/g/personal/dflores_warehousing_cl/Ee1usbdQDZhDme2vsa2hYXwBZdFLHdeg65l-wmCii__fHw?e=J4rrv2"]
-    })
+    # iniciar índice vacío; el usuario podrá pegar la URL y cargarla directamente
+    df_idx = pd.DataFrame(columns=["Nombre", "URL"])
     df_idx.to_csv(INDEX_FILE, index=False)
 
 # --------- sidebar: gestión de inventarios ----------
@@ -60,17 +58,34 @@ with st.sidebar:
 # --------- selección de inventario ----------
 c_top1, c_top2 = st.columns([2,1])
 with c_top1:
-    nombre_sel = st.selectbox("Archivo de inventario", df_idx["Nombre"])
+    if not df_idx.empty:
+        nombre_sel = st.selectbox("Archivo de inventario", df_idx["Nombre"])
+    else:
+        nombre_sel = None
 with c_top2:
     if st.button("🔄 Actualizar datos"):
         st.rerun()
 
-fila_sel = df_idx[df_idx["Nombre"] == nombre_sel].iloc[0]
-base_url = fila_sel["URL"]
-DOWNLOAD_URL = base_url if "download=1" in base_url else \
-               base_url + ("&download=1" if "?" in base_url else "?download=1")
-
-st.caption(f"🔗 Fuente: {nombre_sel}")
+if df_idx.empty:
+    # permitir carga directa por URL cuando no hay inventarios guardados
+    url_direct = st.text_input("Pega la URL del archivo en OneDrive/SharePoint")
+    if not url_direct:
+        st.info("No hay inventarios guardados. Pega la URL del archivo en la caja de texto y presiona 'Cargar'.")
+        if st.button("Cargar desde URL"):
+            st.warning("Pega primero la URL.")
+        st.stop()
+    if st.button("Cargar desde URL"):
+        base_url = url_direct
+    else:
+        st.stop()
+    DOWNLOAD_URL = base_url if "download=1" in base_url else base_url + ("&download=1" if "?" in base_url else "?download=1")
+    st.caption(f"🔗 Fuente: {base_url}")
+else:
+    fila_sel = df_idx[df_idx["Nombre"] == nombre_sel].iloc[0]
+    base_url = fila_sel["URL"]
+    DOWNLOAD_URL = base_url if "download=1" in base_url else \
+                   base_url + ("&download=1" if "?" in base_url else "?download=1")
+    st.caption(f"🔗 Fuente: {nombre_sel}")
 
 # ----------------- funciones aux -----------------
 def limpiar(c): return re.sub(r"\s+","",c).lower()
