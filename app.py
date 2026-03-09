@@ -327,9 +327,9 @@ with tab_resumen:
 
 with tab_detalle:
     with st.expander("Filtros"):
-        conts = df["Contador"].unique() if "Contador" in df.columns else []
-        clis = df["Cliente"].unique() if "Cliente" in df.columns else []
-        ubis = df["Ubicación"].unique() if "Ubicación" in df.columns else []
+        conts = df["Contador"].dropna().unique() if "Contador" in df.columns else []
+        clis = df["Cliente"].dropna().unique() if "Cliente" in df.columns else []
+        ubis = df["Ubicación"].dropna().unique() if "Ubicación" in df.columns else []
         f_cont = st.multiselect("Contador", conts)
         f_cli = st.multiselect("Cliente", clis)
         f_ubi = st.multiselect("Ubicación", ubis)
@@ -389,10 +389,16 @@ with tab_detalle:
             return ["background-color: #fff7cd" for _ in row.index]
         return styles
 
-    sty = df_f.drop(columns=[c for c in df_f.columns if c.startswith("_flag_")]).style
-    # aplicar highlight a filas con diferencia y color texto para negativas
-    sty = sty.apply(lambda r: ["background-color: #fff7cd" if abs(r.get("Dif_calc",0))>0 else "" for _ in r.index], axis=1)
-    sty = sty.applymap(lambda v: "color: red" if isinstance(v,(int,float)) and v<0 else "")
+    # preparar DataFrame para visualización: quitar columnas internas y reemplazar NaN/None por cadena vacía
+    vis_cols = [c for c in df_f.columns if not c.startswith("_flag_")]
+    df_display = df_f[vis_cols].fillna("")
+
+    # crear Styler a partir del DataFrame limpio
+    sty = df_display.style
+    # aplicar highlight a filas con diferencia (usar la columna original en df_f)
+    sty = sty.apply(lambda r: ["background-color: #fff7cd" if abs(df_f.loc[r.name, "Dif_calc"])>0 else "" for _ in r.index], axis=1)
+    # color para valores numéricos negativos
+    sty = sty.applymap(lambda v: "color: red" if isinstance(v, (int, float)) and v < 0 else "")
 
     st.write(sty)
 
