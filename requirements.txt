@@ -4,3 +4,4 @@ openpyxl
 matplotlib
 requests
 openpyxl
+streamlit-aggrid

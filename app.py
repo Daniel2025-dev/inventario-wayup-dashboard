@@ -1,6 +1,6 @@
 import io, re, os, requests, pandas as pd, streamlit as st, sys
 import matplotlib.pyplot as plt
-import streamlit.components.v1 as components
+from st_aggrid import AgGrid, GridOptionsBuilder, JsCode
 
 st.set_page_config(
     page_title="Sistema de Conteo de Inventario Físico con Tablet - WayUP",
@@ -401,6 +401,35 @@ with tab_detalle:
     # color para valores numéricos negativos
     sty = sty.applymap(lambda v: "color: red" if isinstance(v, (int, float)) and v < 0 else "")
 
-    # Renderizar el Styler como HTML para evitar problemas de serialización
-    components.html(sty.to_html(), height=600, scrolling=True)
+    # Mostrar tabla con AgGrid para un treeview moderno y formato condicional
+    gb = GridOptionsBuilder.from_dataframe(df_display)
+    gb.configure_default_column(filterable=True, sortable=True, resizable=True)
+
+    # resaltar fila si Dif_calc != 0
+    row_style = JsCode(
+        """
+        function(params) {
+          if (params.data && Math.abs(params.data.Dif_calc) > 0) {
+            return {'background-color':'#fff7cd'}
+          }
+        }
+        """
+    )
+
+    # colorear valores numéricos negativos en rojo
+    num_cols = list(df_display.select_dtypes(include=['number']).columns)
+    for col in num_cols:
+        gb.configure_column(col, cellStyle=JsCode("function(params){ if(params.value<0){return {'color':'red'} } }"))
+
+    gridOptions = gb.build()
+    gridOptions['getRowStyle'] = row_style
+
+    AgGrid(
+        df_display,
+        gridOptions=gridOptions,
+        allow_unsafe_jscode=True,
+        fit_columns_on_grid_load=True,
+        enable_enterprise_modules=False,
+        height=600,
+    )
 
