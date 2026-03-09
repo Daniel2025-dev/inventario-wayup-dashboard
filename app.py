@@ -1,5 +1,11 @@
 import io, re, os, requests, pandas as pd, streamlit as st, sys
 import matplotlib.pyplot as plt
+# opcional: usar AgGrid para tabla interactiva y estilos condicionales
+try:
+    from st_aggrid import AgGrid, GridOptionsBuilder, JsCode
+    AGGRID_AVAILABLE = True
+except Exception:
+    AGGRID_AVAILABLE = False
 
 st.set_page_config(
     page_title="Dashboard Inventario",
@@ -269,5 +275,42 @@ with tab_detalle:
         df_f = df_f[df_f["Ubicación"].isin(f_ubi)]
 
     st.markdown("#### 📄 Detalle de inventario")
-    st.dataframe(df_f.fillna(""), use_container_width=True)
+
+    # preparar DataFrame para visualización (reemplazar NaN por cadena vacía)
+    df_display = df_f.fillna("")
+
+    # preparar export de diferencias (XLSX)
+    dif_only = df_f[df_f["Dif_calc"].abs() != 0]
+    def _to_excel_bytes(dfx):
+        bio = io.BytesIO()
+        with pd.ExcelWriter(bio, engine="openpyxl") as writer:
+            dfx.to_excel(writer, index=False, sheet_name="Diferencias")
+        return bio.getvalue()
+
+    c1, c2 = st.columns([1,1])
+    with c1:
+        st.download_button("Exportar todo (XLSX)", data=_to_excel_bytes(df_display), file_name="inventario_detalle.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+    with c2:
+        st.download_button("Exportar diferencias (XLSX)", data=_to_excel_bytes(dif_only), file_name="inventario_diferencias.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+
+    # mostrar tabla: AgGrid si está disponible, si no usar st.dataframe
+    if AGGRID_AVAILABLE:
+        gb = GridOptionsBuilder.from_dataframe(df_display)
+        gb.configure_selection(selection_mode="single", use_checkbox=False)
+        js_row_style = JsCode(
+            """
+            function(params) {
+                if (params.data && params.data.Dif_calc !== undefined && Math.abs(params.data.Dif_calc) > 0) {
+                    return { 'backgroundColor': '#fff7cd' };
+                }
+                return null;
+            }
+            """
+        )
+        # aplicar estilo por fila
+        gb.configure_grid_options(getRowStyle=js_row_style)
+        gridOptions = gb.build()
+        AgGrid(df_display, gridOptions=gridOptions, enable_enterprise_modules=False, fit_columns_on_grid_load=True, allow_unsafe_jscode=True)
+    else:
+        st.dataframe(df_display, use_container_width=True)
 
