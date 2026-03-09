@@ -1,5 +1,6 @@
 import io, re, os, requests, pandas as pd, streamlit as st, sys
 import matplotlib.pyplot as plt
+import streamlit.components.v1 as components
 
 st.set_page_config(
     page_title="Sistema de Conteo de Inventario Físico con Tablet - WayUP",
@@ -400,5 +401,6 @@ with tab_detalle:
     # color para valores numéricos negativos
     sty = sty.applymap(lambda v: "color: red" if isinstance(v, (int, float)) and v < 0 else "")
 
-    st.write(sty)
+    # Renderizar el Styler como HTML para evitar problemas de serialización
+    components.html(sty.to_html(), height=600, scrolling=True)
 
