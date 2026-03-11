@@ -1,26 +1,26 @@
-import io, re, os, requests, pandas as pd, streamlit as st, sys
+import io
+import os
+import re
+import unicodedata
+
 import matplotlib.pyplot as plt
-# opcional: usar AgGrid para tabla interactiva y estilos condicionales si está disponible en AgGrid.
-AGGRID_IMPORT_ERROR = None
-try:
-    from st_aggrid import AgGrid, GridOptionsBuilder, JsCode
-    AGGRID_AVAILABLE = True
-except Exception as exc:
-    AGGRID_AVAILABLE = False
-    AGGRID_IMPORT_ERROR = str(exc)
+import pandas as pd
+import requests
+import streamlit as st
+
 
 st.set_page_config(
-    page_title="Herramienta de Inventario conteo fisico – WayUP",
+    page_title="Herramienta de Inventario conteo fisico - WayUP",
     layout="wide",
-    initial_sidebar_state="expanded"
+    initial_sidebar_state="expanded",
 )
 
-# flag para controlar vista ampliada de la tabla (maximizar/minimizar)
 if "table_expanded" not in st.session_state:
     st.session_state["table_expanded"] = False
 
-# ----------------- CSS -----------------
-st.markdown("""
+
+st.markdown(
+    """
 <style>
 .main {background-color:#f3f4f7;}
 [data-testid="stAppViewContainer"] > .main {
@@ -50,272 +50,346 @@ h2{font-family:"Segoe UI",sans-serif;color:#1f2937;}
 }
 #MainMenu{visibility:hidden;} footer{visibility:hidden;}
 </style>
-""", unsafe_allow_html=True)
+""",
+    unsafe_allow_html=True,
+)
 
-st.markdown("<h2 style='text-align:center;'>📦 Herramienta de Inventario conteo fisico – WayUP – WayUP</h2>",
-            unsafe_allow_html=True)
+st.markdown(
+    "<h2 style='text-align:center;'>Herramienta de Inventario conteo fisico - WayUP</h2>",
+    unsafe_allow_html=True,
+)
 
-INDEX_FILE = "inventarios_index.csv" # archivo local para indexar inventarios (nombre + URL)
+INDEX_FILE = "inventarios_index.csv"
 
-# --------- cargar / inicializar índice local de inventarios ----------
-if os.path.exists(INDEX_FILE):
-    df_idx = pd.read_csv(INDEX_FILE)
-else:
-    df_idx = pd.DataFrame({
-        "Nombre": ["inventario.xlsx"],
-        "URL": ["https://warehousing-my.sharepoint.com/:x:/g/personal/dflores_warehousing_cl/Ee1usbdQDZhDme2vsa2hYXwBZdFLHdeg65l-wmCii__fHw?e=J4rrv2"]
-    })
-    df_idx.to_csv(INDEX_FILE, index=False)
 
-# --------- sidebar: gestión de inventarios ----------
-with st.sidebar:
-    st.subheader("📁 Gestionar inventarios")
-    nuevo_nombre = st.text_input("Nombre inventario")
-    nueva_url = st.text_input("URL OneDrive del Excel")
-    if st.button("➕ Guardar inventario"):
-        if nuevo_nombre and nueva_url:
-            df_idx = pd.concat(
-                [df_idx, pd.DataFrame({"Nombre":[nuevo_nombre], "URL":[nueva_url]})],
-                ignore_index=True
-            )
-            df_idx.to_csv(INDEX_FILE, index=False)
-            st.success("Inventario guardado. Recarga la página para verlo en la lista.")
-        else:
-            st.warning("Completa Nombre y URL.")
+def normalize_text(value):
+    text = str(value).strip().lower()
+    text = unicodedata.normalize("NFKD", text)
+    text = "".join(ch for ch in text if not unicodedata.combining(ch))
+    return re.sub(r"\s+", "", text)
 
-# --------- selección de inventario ----------
-c_top1, c_top2 = st.columns([2,1])
-with c_top1:
-    nombre_sel = st.selectbox("Archivo de inventario", df_idx["Nombre"])
-with c_top2:
-    if st.button("🔄 Actualizar datos"):
-        st.rerun()
 
-fila_sel = df_idx[df_idx["Nombre"] == nombre_sel].iloc[0]
-base_url = fila_sel["URL"]
-DOWNLOAD_URL = base_url if "download=1" in base_url else \
-               base_url + ("&download=1" if "?" in base_url else "?download=1")
+def find_column(df, predicate):
+    for column in df.columns:
+        normalized = normalize_text(column)
+        if predicate(normalized):
+            return column
+    return None
 
-st.caption(f"🔗 Fuente: {nombre_sel}")
 
-# ----------------- funciones aux -----------------
-def limpiar(c): return re.sub(r"\s+","",c).lower()
 def col_cantidad(df):
-    for c in df.columns:
-        x=limpiar(c)
-        if x=="cantidad": return c
-    for c in df.columns:
-        x=limpiar(c)
-        if "cantidad" in x and "contar" not in x: return c
-    return None
+    exact = find_column(df, lambda name: name == "cantidad")
+    if exact:
+        return exact
+    return find_column(df, lambda name: "cantidad" in name and "contar" not in name)
+
+
 def col_contar(df):
-    for c in df.columns:
-        x=limpiar(c)
-        if "cantidad" in x and "contar" in x: return c
-    return None
+    return find_column(df, lambda name: "cantidad" in name and "contar" in name)
+
+
 def col_producto(df):
-    for c in df.columns:
-        x=limpiar(c)
-        if "cod" in x and "producto" in x: return c
-    return None
+    return find_column(df, lambda name: "cod" in name and "producto" in name)
 
-# ----------------- descargar inventario -----------------
-def _flatten_cols(cols):
-    if isinstance(cols, pd.MultiIndex):
-        return [" ".join([str(x) for x in t if str(x) and str(x) != "nan"]).strip() for t in cols]
-    return [str(c) for c in cols]
 
-def _detect_and_read_excel(content):
-    # intenta leer como excel (hoja por defecto). Si las cabeceras están en otra fila,
-    # busca dentro de las primeras filas una que contenga palabras clave como 'cantidad'.
+def col_named(df, target):
+    normalized_target = normalize_text(target)
+    return find_column(df, lambda name: name == normalized_target)
+
+
+def flatten_columns(columns):
+    if isinstance(columns, pd.MultiIndex):
+        flattened = []
+        for group in columns:
+            values = [str(item) for item in group if str(item) and str(item) != "nan"]
+            flattened.append(" ".join(values).strip())
+        return flattened
+    return [str(column) for column in columns]
+
+
+def detect_and_read_excel(content):
     try:
-        df_try = pd.read_excel(io.BytesIO(content))
+        dataframe = pd.read_excel(io.BytesIO(content))
     except Exception:
-        # intenta como csv por si acaso
-        try:
-            s = content.decode("utf-8", errors="replace")
-            return pd.read_csv(io.StringIO(s))
-        except Exception as e:
-            raise
+        text = content.decode("utf-8", errors="replace")
+        return pd.read_csv(io.StringIO(text))
 
-    # normalizar columnas multiindex
-    df_try.columns = _flatten_cols(df_try.columns)
+    dataframe.columns = flatten_columns(dataframe.columns)
 
-    # si no detectamos columnas clave, buscar fila de encabezado dentro de las primeras 6 filas
-    def _has_key_cols(dframe):
-        return (col_cantidad(dframe) is not None) and (col_contar(dframe) is not None)
+    if col_cantidad(dataframe) and col_contar(dataframe):
+        return dataframe
 
-    if _has_key_cols(df_try):
-        return df_try
-
-    # leer sin header para inspeccionar filas
     try:
         raw = pd.read_excel(io.BytesIO(content), header=None)
     except Exception:
-        return df_try
+        return dataframe
 
     max_check = min(6, len(raw))
-    for r in range(max_check):
-        row = raw.iloc[r].astype(str).fillna("").tolist()
-        cleaned = [re.sub(r"\s+","",str(x)).lower() for x in row]
-        # si alguna celda de la fila contiene 'cantidad' o 'codproducto' etc.
-        if any(("cantidad" in c) or ("cod" in c and "producto" in c) for c in cleaned):
-            # relectura usando esa fila como header
+    for row_index in range(max_check):
+        row = raw.iloc[row_index].astype(str).fillna("").tolist()
+        cleaned = [normalize_text(cell) for cell in row]
+        if any(("cantidad" in cell) or ("cod" in cell and "producto" in cell) for cell in cleaned):
             try:
-                df_new = pd.read_excel(io.BytesIO(content), header=r)
-                df_new.columns = _flatten_cols(df_new.columns)
-                return df_new
+                retry = pd.read_excel(io.BytesIO(content), header=row_index)
+                retry.columns = flatten_columns(retry.columns)
+                return retry
             except Exception:
                 continue
 
-    return df_try
+    return dataframe
+
+
+def to_excel_bytes(dataframe, sheet_name):
+    buffer = io.BytesIO()
+    with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
+        dataframe.to_excel(writer, index=False, sheet_name=sheet_name)
+    return buffer.getvalue()
+
+
+def highlight_differences(row):
+    difference = row.get("Dif_calc", 0)
+    try:
+        has_difference = abs(float(difference)) > 0
+    except (TypeError, ValueError):
+        has_difference = False
+    color = "background-color: #fff7cd" if has_difference else ""
+    return [color] * len(row)
+
+
+def render_inventory_table(dataframe, height):
+    styled = dataframe.style.apply(highlight_differences, axis=1)
+    st.dataframe(styled, height=height, use_container_width=True)
+
+
+if os.path.exists(INDEX_FILE):
+    df_idx = pd.read_csv(INDEX_FILE)
+else:
+    df_idx = pd.DataFrame(
+        {
+            "Nombre": ["inventario.xlsx"],
+            "URL": [
+                "https://warehousing-my.sharepoint.com/:x:/g/personal/dflores_warehousing_cl/Ee1usbdQDZhDme2vsa2hYXwBZdFLHdeg65l-wmCii__fHw?e=J4rrv2"
+            ],
+        }
+    )
+    df_idx.to_csv(INDEX_FILE, index=False)
+
+
+with st.sidebar:
+    st.subheader("Gestionar inventarios")
+    nuevo_nombre = st.text_input("Nombre inventario")
+    nueva_url = st.text_input("URL OneDrive del Excel")
+    if st.button("Guardar inventario"):
+        if nuevo_nombre and nueva_url:
+            df_idx = pd.concat(
+                [df_idx, pd.DataFrame({"Nombre": [nuevo_nombre], "URL": [nueva_url]})],
+                ignore_index=True,
+            )
+            df_idx.to_csv(INDEX_FILE, index=False)
+            st.success("Inventario guardado. Recarga la pagina para verlo en la lista.")
+        else:
+            st.warning("Completa Nombre y URL.")
+
+
+c_top1, c_top2 = st.columns([2, 1])
+with c_top1:
+    nombre_sel = st.selectbox("Archivo de inventario", df_idx["Nombre"])
+with c_top2:
+    if st.button("Actualizar datos"):
+        st.rerun()
+
+
+fila_sel = df_idx[df_idx["Nombre"] == nombre_sel].iloc[0]
+base_url = fila_sel["URL"]
+download_url = (
+    base_url
+    if "download=1" in base_url
+    else base_url + ("&download=1" if "?" in base_url else "?download=1")
+)
+
+st.caption(f"Fuente: {nombre_sel}")
+
 
 df = None
 try:
-    resp = requests.get(DOWNLOAD_URL, timeout=30)
-    resp.raise_for_status()
-    df = _detect_and_read_excel(resp.content)
-except requests.exceptions.RequestException as e:
-    st.error(f"❌ Error descargando inventario: {e}")
+    response = requests.get(download_url, timeout=30)
+    response.raise_for_status()
+    df = detect_and_read_excel(response.content)
+except requests.exceptions.RequestException as exc:
+    st.error(f"Error descargando inventario: {exc}")
     st.stop()
-    raise SystemExit(1)
-except Exception as e:
-    st.error(f"❌ Error leyendo inventario: {e}")
+except Exception as exc:
+    st.error(f"Error leyendo inventario: {exc}")
     st.stop()
-    raise SystemExit(1)
 
-# asegurar que tenemos un DataFrame válido
 if df is None:
-    st.error("❌ No se pudo leer el inventario.")
+    st.error("No se pudo leer el inventario.")
     raise SystemExit(1)
 
-# limpiar y normalizar nombres de columna
-df.columns = [c.strip() for c in df.columns]
+
+df.columns = [str(column).strip() for column in df.columns]
 c_cant = col_cantidad(df)
 c_cont = col_contar(df)
 if not c_cant or not c_cont:
     st.error("No se detectan columnas 'Cantidad' o 'Cantidad a contar'.")
-    st.write("Columnas:", list(df.columns)); st.stop()
+    st.write("Columnas:", list(df.columns))
+    st.stop()
+
+contador_col = col_named(df, "Contador")
+cliente_col = col_named(df, "Cliente")
+ubicacion_col = col_named(df, "Ubicacion")
 
 df[c_cant] = pd.to_numeric(df[c_cant], errors="coerce").fillna(0)
-df[c_cont] = pd.to_numeric(df[c_cont], errors="coerce")  # NaN si vacío
-
-# diferencias solo si Cantidad a contar NO es nulo
+df[c_cont] = pd.to_numeric(df[c_cont], errors="coerce")
 df["Dif_calc"] = df.apply(
-    lambda x: (x[c_cont] - x[c_cant]) if pd.notna(x[c_cont]) else 0,
-    axis=1
+    lambda row: (row[c_cont] - row[c_cant]) if pd.notna(row[c_cont]) else 0,
+    axis=1,
 )
 df["Diferencias"] = df["Dif_calc"].astype(int)
 
 tot_sist = df[c_cant].sum()
 tot_cont = df[c_cont].sum(skipna=True)
 tot_dif = df["Dif_calc"].sum()
-pct_avance = (tot_cont/tot_sist*100) if tot_sist else 0
-pct_dif = (tot_dif/tot_sist*100) if tot_sist else 0
+pct_avance = (tot_cont / tot_sist * 100) if tot_sist else 0
+pct_dif = (tot_dif / tot_sist * 100) if tot_sist else 0
 
-# ----------------- KPIs -----------------
-k1,k2,k3,k4,k5 = st.columns(5)
+
+k1, k2, k3, k4, k5 = st.columns(5)
 k1.metric("Sistema", f"{tot_sist:,.0f}")
 k2.metric("Contado", f"{tot_cont:,.0f}")
 k3.metric("Dif. total", f"{tot_dif:,.0f}")
 k4.metric("% Dif.", f"{pct_dif:.2f}%")
 k5.metric("% Avance", f"{pct_avance:.2f}%")
-st.progress(min(pct_avance/100,1.0))
+st.progress(min(pct_avance / 100, 1.0))
 st.markdown("---")
 
-tab_resumen, tab_detalle = st.tabs(["📊 Visión general","📄 Detalle & filtros"])
+
+tab_resumen, tab_detalle = st.tabs(["Vision general", "Detalle y filtros"])
 
 with tab_resumen:
-    c1,c2 = st.columns(2)
+    c1, c2 = st.columns(2)
     with c1:
-        st.markdown("#### 🎯 Avance general")
-        pct_g = max(0,min(pct_avance,100))
-        fig,ax = plt.subplots(figsize=(3.5,3.5))
-        ax.pie([pct_g,100-pct_g],colors=["#22c55e","#e5e7eb"],
-               startangle=90,counterclock=False,
-               wedgeprops={"width":0.32})
-        ax.text(0,0,f"{pct_g:.1f}%",ha="center",va="center",
-                fontsize=18,color="#16a34a",fontweight="bold")
-        ax.set(aspect="equal"); plt.tight_layout(); st.pyplot(fig)
+        st.markdown("#### Avance general")
+        pct_general = max(0, min(pct_avance, 100))
+        fig, ax = plt.subplots(figsize=(3.5, 3.5))
+        ax.pie(
+            [pct_general, 100 - pct_general],
+            colors=["#22c55e", "#e5e7eb"],
+            startangle=90,
+            counterclock=False,
+            wedgeprops={"width": 0.32},
+        )
+        ax.text(
+            0,
+            0,
+            f"{pct_general:.1f}%",
+            ha="center",
+            va="center",
+            fontsize=18,
+            color="#16a34a",
+            fontweight="bold",
+        )
+        ax.set(aspect="equal")
+        plt.tight_layout()
+        st.pyplot(fig)
+
     with c2:
-        st.markdown("#### 🧍 Avance por contador")
-        if "Contador" in df.columns:
-            grp = df.groupby("Contador").agg(
-                sist=(c_cant,"sum"),
-                cont=(c_cont,"sum")
-            )
+        st.markdown("#### Avance por contador")
+        if contador_col:
+            grp = df.groupby(contador_col).agg(sist=(c_cant, "sum"), cont=(c_cont, "sum"))
             grp["pct"] = grp.apply(
-                lambda x:(x["cont"]/x["sist"]*100) if x["sist"] else 0,axis=1
+                lambda row: (row["cont"] / row["sist"] * 100) if row["sist"] else 0,
+                axis=1,
             )
-            cont_sel = st.selectbox("Selecciona contador", grp.index)
-            pct_c = grp.loc[cont_sel,"pct"]
-            fig2,ax2 = plt.subplots(figsize=(3.5,3.5))
-            ax2.pie([pct_c,100-pct_c],colors=["#3b82f6","#e5e7eb"],
-                    startangle=90,counterclock=False,
-                    wedgeprops={"width":0.4})
-            ax2.text(0,0,f"{pct_c:.1f}%",ha="center",va="center",
-                     fontsize=18,color="#1d4ed8",fontweight="bold")
-            ax2.set(aspect="equal"); plt.tight_layout(); st.pyplot(fig2)
+            contador_sel = st.selectbox("Selecciona contador", grp.index)
+            pct_contador = grp.loc[contador_sel, "pct"]
+            fig2, ax2 = plt.subplots(figsize=(3.5, 3.5))
+            ax2.pie(
+                [pct_contador, 100 - pct_contador],
+                colors=["#3b82f6", "#e5e7eb"],
+                startangle=90,
+                counterclock=False,
+                wedgeprops={"width": 0.4},
+            )
+            ax2.text(
+                0,
+                0,
+                f"{pct_contador:.1f}%",
+                ha="center",
+                va="center",
+                fontsize=18,
+                color="#1d4ed8",
+                fontweight="bold",
+            )
+            ax2.set(aspect="equal")
+            plt.tight_layout()
+            st.pyplot(fig2)
         else:
             st.info("No existe columna 'Contador'.")
 
     st.markdown("---")
-    st.markdown("#### 🔎 Top 15 productos con mayor diferencia absoluta")
-    c_prod = col_producto(df)
-    if c_prod:
-        dif = df.groupby(c_prod)["Dif_calc"].sum()
+    st.markdown("#### Top 15 productos con mayor diferencia absoluta")
+    producto_col = col_producto(df)
+    if producto_col:
+        dif = df.groupby(producto_col)["Dif_calc"].sum()
         dif_abs = dif.abs().sort_values(ascending=False).head(15)
-        fig3,ax3 = plt.subplots(figsize=(7,4))
+        fig3, ax3 = plt.subplots(figsize=(7, 4))
         cmap = plt.get_cmap("tab20")
-        colors = [cmap(i) for i in range(len(dif_abs))]
-        ax3.barh(dif_abs.index,dif_abs.values,color=colors)
+        colors = [cmap(index) for index in range(len(dif_abs))]
+        ax3.barh(dif_abs.index, dif_abs.values, color=colors)
         ax3.invert_yaxis()
         ax3.set_xlabel("Diferencia absoluta")
         ax3.set_ylabel("Producto")
-        ax3.grid(axis="x",linestyle="--",alpha=0.3)
-        plt.tight_layout(); st.pyplot(fig3)
+        ax3.grid(axis="x", linestyle="--", alpha=0.3)
+        plt.tight_layout()
+        st.pyplot(fig3)
     else:
-        st.info("No se encontró columna de código de producto.")
+        st.info("No se encontro columna de codigo de producto.")
+
 
 with tab_detalle:
     with st.expander("Filtros"):
-        conts = df["Contador"].unique() if "Contador" in df.columns else []
-        clis = df["Cliente"].unique() if "Cliente" in df.columns else []
-        ubis = df["Ubicación"].unique() if "Ubicación" in df.columns else []
-        f_cont = st.multiselect("Contador", conts)
-        f_cli = st.multiselect("Cliente", clis)
-        f_ubi = st.multiselect("Ubicación", ubis)
+        contadores = df[contador_col].dropna().unique() if contador_col else []
+        clientes = df[cliente_col].dropna().unique() if cliente_col else []
+        ubicaciones = df[ubicacion_col].dropna().unique() if ubicacion_col else []
+        filtro_contador = st.multiselect("Contador", contadores)
+        filtro_cliente = st.multiselect("Cliente", clientes)
+        filtro_ubicacion = st.multiselect("Ubicacion", ubicaciones)
 
     df_f = df.copy()
-    if f_cont and "Contador" in df_f.columns:
-        df_f = df_f[df_f["Contador"].isin(f_cont)]
-    if f_cli and "Cliente" in df_f.columns:
-        df_f = df_f[df_f["Cliente"].isin(f_cli)]
-    if f_ubi and "Ubicación" in df_f.columns:
-        df_f = df_f[df_f["Ubicación"].isin(f_ubi)]
+    if filtro_contador and contador_col:
+        df_f = df_f[df_f[contador_col].isin(filtro_contador)]
+    if filtro_cliente and cliente_col:
+        df_f = df_f[df_f[cliente_col].isin(filtro_cliente)]
+    if filtro_ubicacion and ubicacion_col:
+        df_f = df_f[df_f[ubicacion_col].isin(filtro_ubicacion)]
 
-    st.markdown("#### 📄 Detalle de inventario")
+    st.markdown("#### Detalle de inventario")
 
-    # preparar DataFrame para visualización (reemplazar NaN por cadena vacía)
     df_display = df_f.fillna("")
-
-    # preparar export de diferencias (XLSX)
     dif_only = df_f[df_f["Dif_calc"].abs() != 0]
-    def _to_excel_bytes(dfx):
-        bio = io.BytesIO()
-        with pd.ExcelWriter(bio, engine="openpyxl") as writer:
-            dfx.to_excel(writer, index=False, sheet_name="Diferencias")
-        return bio.getvalue()
 
-    c1, c2 = st.columns([1,1])
+    c1, c2 = st.columns([1, 1])
     with c1:
-        st.download_button("Exportar todo (XLSX)", data=_to_excel_bytes(df_display), file_name="inventario_detalle.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+        st.download_button(
+            "Exportar todo (XLSX)",
+            data=to_excel_bytes(df_display, "Detalle"),
+            file_name="inventario_detalle.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
     with c2:
-        st.download_button("Exportar diferencias (XLSX)", data=_to_excel_bytes(dif_only), file_name="inventario_diferencias.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+        st.download_button(
+            "Exportar diferencias (XLSX)",
+            data=to_excel_bytes(dif_only, "Diferencias"),
+            file_name="inventario_diferencias.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
 
-    # controles para maximizar/minimizar la vista de la tabla
-    st.markdown("<div class='toolbar-card'><div class='toolbar-label'>Vista de tabla</div>", unsafe_allow_html=True)
-    c_ctrl, c_space = st.columns([0.22, 0.78])
+    st.markdown(
+        "<div class='toolbar-card'><div class='toolbar-label'>Vista de tabla</div>",
+        unsafe_allow_html=True,
+    )
+    c_ctrl, _ = st.columns([0.22, 0.78])
     with c_ctrl:
         if st.session_state.get("table_expanded", False):
             if st.button("Minimizar tabla", key="minimize_table", use_container_width=True):
@@ -325,37 +399,9 @@ with tab_detalle:
                 st.session_state["table_expanded"] = True
     st.markdown("</div>", unsafe_allow_html=True)
 
-    # preparar opciones de AgGrid si está disponible
-    if AGGRID_AVAILABLE:
-        gb = GridOptionsBuilder.from_dataframe(df_display)
-        gb.configure_selection(selection_mode="single", use_checkbox=False)
-        js_row_style = JsCode(
-            """
-            function(params) {
-                if (params.data && params.data.Dif_calc !== undefined && Math.abs(params.data.Dif_calc) > 0) {
-                    return { 'backgroundColor': '#fff7cd' };
-                }
-                return null;
-            }
-            """
-        )
-        gb.configure_grid_options(getRowStyle=js_row_style)
-        gridOptions = gb.build()
-
-    # vista ampliada: mostrar solo la tabla en grande
     if st.session_state.get("table_expanded", False):
-        st.markdown("#### Vista ampliada — Tabla")
-        if AGGRID_AVAILABLE:
-            AgGrid(df_display, gridOptions=gridOptions, enable_enterprise_modules=False, fit_columns_on_grid_load=True, allow_unsafe_jscode=True, height=700)
-        else:
-            st.dataframe(df_display, height=700, use_container_width=True)
+        st.markdown("#### Vista ampliada - Tabla")
+        render_inventory_table(df_display, height=700)
         st.stop()
 
-    # vista normal: tabla integrada en la página
-    if AGGRID_AVAILABLE:
-        AgGrid(df_display, gridOptions=gridOptions, enable_enterprise_modules=False, fit_columns_on_grid_load=True, allow_unsafe_jscode=True, height=350)
-    else:
-        if AGGRID_IMPORT_ERROR:
-            st.warning(f"No se pudo cargar streamlit-aggrid en este entorno: {AGGRID_IMPORT_ERROR}")
-        st.dataframe(df_display, use_container_width=True)
-
+    render_inventory_table(df_display, height=350)
