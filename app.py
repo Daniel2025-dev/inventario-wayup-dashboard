@@ -1,11 +1,13 @@
 import io, re, os, requests, pandas as pd, streamlit as st, sys
 import matplotlib.pyplot as plt
 # opcional: usar AgGrid para tabla interactiva y estilos condicionales si está disponible en AgGrid.
+AGGRID_IMPORT_ERROR = None
 try:
     from st_aggrid import AgGrid, GridOptionsBuilder, JsCode
     AGGRID_AVAILABLE = True
-except Exception:
+except Exception as exc:
     AGGRID_AVAILABLE = False
+    AGGRID_IMPORT_ERROR = str(exc)
 
 st.set_page_config(
     page_title="Herramienta de Inventario conteo fisico – WayUP",
@@ -353,5 +355,7 @@ with tab_detalle:
     if AGGRID_AVAILABLE:
         AgGrid(df_display, gridOptions=gridOptions, enable_enterprise_modules=False, fit_columns_on_grid_load=True, allow_unsafe_jscode=True, height=350)
     else:
+        if AGGRID_IMPORT_ERROR:
+            st.warning(f"No se pudo cargar streamlit-aggrid en este entorno: {AGGRID_IMPORT_ERROR}")
         st.dataframe(df_display, use_container_width=True)
 
