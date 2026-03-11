@@ -1,6 +1,6 @@
 import io, re, os, requests, pandas as pd, streamlit as st, sys
 import matplotlib.pyplot as plt
-# opcional: usar AgGrid para tabla interactiva y estilos condicionales
+# opcional: usar AgGrid para tabla interactiva y estilos condicionales si está disponible en AgGrid.
 try:
     from st_aggrid import AgGrid, GridOptionsBuilder, JsCode
     AGGRID_AVAILABLE = True
@@ -12,6 +12,10 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="expanded"
 )
+
+# flag para controlar vista ampliada de la tabla (maximizar/minimizar)
+if "table_expanded" not in st.session_state:
+    st.session_state["table_expanded"] = False
 
 # ----------------- CSS -----------------
 st.markdown("""
@@ -28,6 +32,20 @@ h2{font-family:"Segoe UI",sans-serif;color:#1f2937;}
 }
 .stTabs [role="tab"]{padding:.5rem 1rem;border-radius:999px;border:1px solid transparent;}
 .stTabs [role="tab"][aria-selected="true"]{background:#fff;border-color:#d1d5db;}
+.toolbar-card{
+  background:#ffffff;
+  border:1px solid #dbe2ea;
+  border-radius:14px;
+  padding:.7rem .75rem;
+  margin:.75rem 0;
+  box-shadow:0 2px 10px rgba(15,23,42,.05);
+}
+.toolbar-label{
+  font-size:.85rem;
+  color:#475569;
+  margin-bottom:.4rem;
+  font-weight:600;
+}
 #MainMenu{visibility:hidden;} footer{visibility:hidden;}
 </style>
 """, unsafe_allow_html=True)
@@ -35,7 +53,7 @@ h2{font-family:"Segoe UI",sans-serif;color:#1f2937;}
 st.markdown("<h2 style='text-align:center;'>📦 Herramienta de Inventario conteo fisico – WayUP – WayUP</h2>",
             unsafe_allow_html=True)
 
-INDEX_FILE = "inventarios_index.csv"
+INDEX_FILE = "inventarios_index.csv" # archivo local para indexar inventarios (nombre + URL)
 
 # --------- cargar / inicializar índice local de inventarios ----------
 if os.path.exists(INDEX_FILE):
@@ -293,7 +311,19 @@ with tab_detalle:
     with c2:
         st.download_button("Exportar diferencias (XLSX)", data=_to_excel_bytes(dif_only), file_name="inventario_diferencias.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 
-    # mostrar tabla: AgGrid si está disponible, si no usar st.dataframe
+    # controles para maximizar/minimizar la vista de la tabla
+    st.markdown("<div class='toolbar-card'><div class='toolbar-label'>Vista de tabla</div>", unsafe_allow_html=True)
+    c_ctrl, c_space = st.columns([0.22, 0.78])
+    with c_ctrl:
+        if st.session_state.get("table_expanded", False):
+            if st.button("Minimizar tabla", key="minimize_table", use_container_width=True):
+                st.session_state["table_expanded"] = False
+        else:
+            if st.button("Ampliar tabla", key="maximize_table", use_container_width=True):
+                st.session_state["table_expanded"] = True
+    st.markdown("</div>", unsafe_allow_html=True)
+
+    # preparar opciones de AgGrid si está disponible
     if AGGRID_AVAILABLE:
         gb = GridOptionsBuilder.from_dataframe(df_display)
         gb.configure_selection(selection_mode="single", use_checkbox=False)
@@ -307,10 +337,21 @@ with tab_detalle:
             }
             """
         )
-        # aplicar estilo por fila
         gb.configure_grid_options(getRowStyle=js_row_style)
         gridOptions = gb.build()
-        AgGrid(df_display, gridOptions=gridOptions, enable_enterprise_modules=False, fit_columns_on_grid_load=True, allow_unsafe_jscode=True)
+
+    # vista ampliada: mostrar solo la tabla en grande
+    if st.session_state.get("table_expanded", False):
+        st.markdown("#### Vista ampliada — Tabla")
+        if AGGRID_AVAILABLE:
+            AgGrid(df_display, gridOptions=gridOptions, enable_enterprise_modules=False, fit_columns_on_grid_load=True, allow_unsafe_jscode=True, height=700)
+        else:
+            st.dataframe(df_display, height=700, use_container_width=True)
+        st.stop()
+
+    # vista normal: tabla integrada en la página
+    if AGGRID_AVAILABLE:
+        AgGrid(df_display, gridOptions=gridOptions, enable_enterprise_modules=False, fit_columns_on_grid_load=True, allow_unsafe_jscode=True, height=350)
     else:
         st.dataframe(df_display, use_container_width=True)
 
